@@ -1,0 +1,19 @@
+{
+  "name": "bili-pinned-card",
+  "version": "1.0.0",
+  "description": "B站置顶评论监测 + 自动出图（全平台独立版，无需浏览器、无需登录）",
+  "main": "cli.js",
+  "bin": {
+    "bili-pinned-card": "cli.js"
+  },
+  "scripts": {
+    "start": "node cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  },
+  "license": "MIT"
+}
