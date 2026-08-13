@@ -85,7 +85,11 @@ section .sec-sub { text-align: center; color: var(--dim); font-size: 15px; margi
 .shot { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; }
 .shot .cap { text-align: center; font-size: 14px; color: var(--dim); margin-bottom: 12px; }
 .shot img { width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); display: block; }
-.shot.tall img { max-height: 720px; object-fit: cover; object-position: top; }
+.shot.tall .img-scroll {
+  max-height: 720px; overflow-y: auto; border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.shot.tall img { border: none; border-radius: 0; }
 
 /* 代码 */
 .code {
@@ -206,8 +210,10 @@ footer .mt { margin-top: 8px; }
           <a href="assets/pinned-card.png" target="_blank"><img src="assets/pinned-card.png" alt="置顶评论卡片效果图"></a>
         </div>
         <div class="shot tall">
-          <div class="cap">UP 互动回顾图（取消置顶时自动生成）</div>
-          <a href="assets/up-context.png" target="_blank"><img src="assets/up-context.png" alt="UP互动回顾图效果图"></a>
+          <div class="cap">UP 互动回顾图（取消置顶时自动生成）· 框内上下滚动可查看完整</div>
+          <div class="img-scroll">
+            <a href="assets/up-context.png" target="_blank"><img src="assets/up-context.png" alt="UP互动回顾图效果图"></a>
+          </div>
         </div>
       </div>
     </div>
