@@ -6,7 +6,9 @@
 - ✅ 跨平台：Windows / macOS / Linux（渲染用 `@resvg/resvg-js` 预编译二进制，无编译）
 - ✅ 匿名可用：置顶评论数据无需登录即可读取
 - ✅ 终端交互：模式选择、配置引导（记住上次配置）、监控状态实时输出、Ctrl+C 优雅退出
-- ✅ 变化检测：置顶评论换新 / 取消置顶 自动识别；`state.json` 持久化，重启不重出图
+- ✅ 变化检测：置顶评论换新 / 置顶动态被替换 / 取消置顶 / 普通动态更新（可选）自动识别；`state.json` 持久化，重启不重出图
+- ✅ 取消置顶/换新时自动出「UP 互动回顾图」：拉取旧评论全部子回复，筛选 UP 回复/UP 点赞的评论形成对话链
+- ✅ `--track-dyn` 可选监测普通动态更新：置顶未变但 UP 发了新动态时提示并出「动态更新」卡片
 - ✅ 2x 高清输出：`pinned-card_<时间戳>_<rpid>.png` + `latest.png`
 
 ## 安装
@@ -43,6 +45,9 @@ node cli.js --oid 404135596 --once --force
 # 卡片上绘制精彩回复
 node cli.js --oid 404135596 --once -r
 
+# 同时监测普通动态更新（置顶未变但发了新动态时提示并出图）
+node cli.js --uid 401315430 --cookie "SESSDATA=xxx" --watch --track-dyn -i 120
+
 # 安静模式：仅输出生成的文件路径（方便脚本取用）
 node cli.js --uid 401315430 --cookie "SESSDATA=xxx" --watch -i 300 -q
 ```
@@ -68,6 +73,17 @@ node cli.js --uid 401315430 --cookie "SESSDATA=xxx" --watch -i 300 -q
 
 风控提示会直接显示在终端里，按提示操作即可恢复。
 
+## 事件与出图对照
+
+| 事件 | 触发条件 | 出图 |
+|---|---|---|
+| 首次/置顶评论换新 | rpid 与上次不同 | 置顶评论卡片（换新时先出旧评论的互动回顾图） |
+| 置顶动态被替换 | 置顶动态 ID 变化 | 新置顶动态的评论卡片 |
+| 置顶评论取消 | 之前有置顶评论，现在无 | UP 互动回顾图（旧评论的子回复中筛选 UP 回复/点赞） |
+| 普通动态更新（可选） | `--track-dyn` 开启且最新动态 ID 变化（置顶未变） | 动态更新卡片 |
+
+「UP 互动回顾图」：旧评论被取消置顶/换新时，拉取其全部子回复，筛选出被 UP 回复、被 UP 点赞的评论，以对话链形式绘制。旧评论已删除时自动跳过（仅日志提示）。
+
 ## 卡片样式
 
 复刻原浏览器版模板（深色渐变 + 粉色徽标）：
@@ -81,13 +97,16 @@ node cli.js --uid 401315430 --cookie "SESSDATA=xxx" --watch -i 300 -q
 
 ## 输出文件
 
-- `pinned-card_<yyyyMMddHHmmss>_<rpid>.png` —— 每次变化的成品（2x 高清）
-- `latest.png` —— 最新一张的固定名副本
-- `state.json` —— 监控状态（上次 rpid/oid/时间），删除后下次运行会重新出图
+- `pinned-card_<yyyyMMddHHmmss>_<rpid>.png` —— 置顶评论卡片（2x 高清）
+- `unpinned-context_<时间戳>_<rpid>.png` —— 取消置顶/换新时的 UP 互动回顾图
+- `dynamic-update_<时间戳>_<动态ID>.png` —— 普通动态更新卡片（`--track-dyn`）
+- `latest.png` / `latest-unpinned.png` / `latest-dynamic.png` —— 各类最新一张的固定名副本
+- `state.json` —— 监控状态（上次 rpid/oid/动态ID/时间），删除后下次运行会重新出图
 
 ## 常见问题
 
 - **`-352` 风控**：匿名自动识别置顶动态被拦截 → 提供 `--cookie` 或改用 `--oid` 直连。
+- **互动图显示「暂无 UP 互动」**：该评论的子回复中没有 UP 回复/点赞的记录，属正常情况。
 - **图片空白/占位**：个别 CDN 图下载失败时自动降级为占位块，不影响文字。
 - **`--interval` 最小 10 秒**：过频会被风控，建议 ≥ 30。
 - **Node < 18**：`fetch`/`AbortSignal.timeout` 不可用，请升级。

@@ -15,8 +15,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const readline = require('readline');
-const { BiliError, getPinnedDynamic, getPinnedComment, getReplies } = require('./lib/api');
-const { generateCard } = require('./lib/card');
+const { BiliError, getPinnedDynamic, getPinnedComment, getReplies, getCommentDetail, getAllSubReplies, filterUpInteractions } = require('./lib/api');
+const { generateCard, generateUnpinnedCard, generateDynamicCard } = require('./lib/card');
 
 const VERSION = '1.0.0';
 const CFG_DIR = path.join(os.homedir(), '.bili-pinned-card');
@@ -54,7 +54,7 @@ function parseArgs(argv) {
   const a = {
     uid: null, oid: null, type: null, interval: null, out: null,
     once: false, force: false, showReplies: null, cookie: null,
-    upName: null, quiet: false, help: false,
+    upName: null, quiet: false, trackDyn: null, help: false,
   };
   const set = (k, v) => { a[k] = v; };
   for (let i = 0; i < argv.length; i++) {
@@ -67,6 +67,8 @@ function parseArgs(argv) {
       case '--out': case '-o': set('out', argv[++i]); break;
       case '--cookie': case '-c': set('cookie', argv[++i]); break;
       case '--up-name': set('upName', argv[++i]); break;
+      case '--track-dyn': set('trackDyn', true); break;
+      case '--no-track-dyn': set('trackDyn', false); break;
       case '--once': set('once', true); break;
       case '--watch': set('once', false); break;
       case '--force': set('force', true); break;
@@ -93,6 +95,7 @@ const HELP = `
   --once                 单次检查并出图后退出
   --force                即使置顶评论未变化也重新出图
   -r, --show-replies     卡片上绘制精彩回复（默认不画）
+  --track-dyn            同时监测普通动态更新：置顶未变但发了新动态时提示并出图
   -i, --interval <秒>    监控间隔（默认 60，最短 10）
   -o, --out <目录>       输出目录（默认 ./output）
   -q, --quiet            安静模式（仅输出结果行）
@@ -177,8 +180,41 @@ function saveState(outDir, st) {
 }
 
 // ====== 核心检查 ======
+
+/** 取消置顶/换新时：拉取旧评论互动并出回顾图（失败降级为日志，不影响主流程） */
+async function generateUnpinnedIfPossible(st, cfg, reason) {
+  const oldRpid = st?.lastRpid;
+  const oldOid = st?.oid || cfg.oid;
+  const oldType = st?.type || cfg.type;
+  if (!oldRpid || !oldOid) return null;
+  try {
+    const detail = await getCommentDetail(oldOid, oldType, oldRpid, cfg.cookie);
+    if (!detail) {
+      if (!cfg.quiet) log(C.dim(`旧评论 ${oldRpid} 已不可查（可能已删除），跳过互动图`));
+      return null;
+    }
+    if (!cfg.quiet) log(C.dim(`拉取旧评论 ${oldRpid} 的子回复...`));
+    const replies = await getAllSubReplies(oldOid, oldType, oldRpid, cfg.cookie, 5);
+    const items = filterUpInteractions(replies, cfg.uid);
+    const replyN = items.filter(i => i.kind === 'reply').length;
+    const likeN = items.filter(i => i.kind === 'like').length;
+    if (!cfg.quiet) log(C.dim(`UP 回复 ${replyN} 条, UP 点赞 ${likeN} 条, 共 ${items.length} 条互动`));
+    const { file } = await generateUnpinnedCard({
+      comment: detail,
+      items,
+      opts: { upName: cfg.upName },
+      outDir: cfg.outDir,
+    });
+    if (!cfg.quiet) log(`${C.green('✅ 互动回顾图')} (${reason}): ${file}`);
+    return file;
+  } catch (err) {
+    if (!cfg.quiet) log(C.red(`✗ 互动图生成失败（${reason}）: ${err.message}`));
+    return null;
+  }
+}
+
 async function checkOnce(cfg) {
-  let { uid, oid, type, cookie, upName, showReplies, outDir, force } = cfg;
+  let { uid, oid, type, cookie, upName, showReplies, outDir, force, trackDyn } = cfg;
   let dyn = null;
 
   // 1. 确定 oid（未指定时用 Cookie 自动识别置顶动态）
@@ -193,27 +229,56 @@ async function checkOnce(cfg) {
   const comment = await getPinnedComment(oid, type, cookie);
   const st = loadState(outDir);
 
-  // 3. 变化判定（无 state 时视为首次 → 必然变化；isFirst 不参与判定，保证 --once 跨进程生效）
+  // 3. 变化判定（无 state 时视为首次 → 必然变化）
   const dynChanged = dyn && st && st.lastDynId && st.lastDynId !== dyn.dynId;
   const rpidChanged = !st || st.lastRpid !== (comment ? comment.rpid : null);
   const changed = force || dynChanged || rpidChanged;
 
+  // A. 置顶评论被取消（之前有，现在无）→ 出旧评论互动回顾图
   if (!comment) {
     if (st?.lastRpid) {
-      if (!cfg.quiet) log(C.yellow('🔄 置顶评论已取消置顶（之前有，现在无）'));
-      saveState(outDir, { ...st, lastRpid: null, lastCheck: new Date().toISOString() });
-      return { event: 'unpinned' };
+      if (!cfg.quiet) log(C.yellow('🔄 置顶评论已取消置顶，生成互动回顾图...'));
+      const file = await generateUnpinnedIfPossible(st, cfg, '已取消置顶');
+      saveState(outDir, { ...st, lastRpid: null, lastUnpinnedRpid: st.lastRpid, lastCheck: new Date().toISOString() });
+      return { event: 'unpinned', file };
     }
     if (!cfg.quiet) log(C.dim('无置顶评论'));
     return { event: 'none', oid, type };
   }
 
+  // B. 普通动态更新（置顶未变，但最新动态变了）→ 提示 + 出动态更新卡片
+  const dynUpdate = trackDyn && dyn && st?.lastLatestId && st.lastLatestId !== dyn.latestId && !dynChanged;
+  if (dynUpdate) {
+    if (!cfg.quiet) log(`${C.yellow('🆕 检测到普通动态更新')} (${dyn.latestId})，生成动态卡片...`);
+    try {
+      const { file } = await generateDynamicCard({
+        dyn,
+        opts: { upName: upName || dyn.latestAuthor || dyn.author },
+        outDir,
+      });
+      if (!cfg.quiet) log(`${C.green('✅ 动态更新卡片:')} ${file}`);
+      st._dynFile = file;
+    } catch (err) {
+      if (!cfg.quiet) log(C.red(`✗ 动态卡片生成失败: ${err.message}`));
+    }
+  }
+
   if (!changed) {
     if (!cfg.quiet) log(`${C.dim('置顶评论未变化:')} ${C.bold(comment.author)} "${(comment.message || '').slice(0, 30)}"${C.dim(` (rpid=${comment.rpid})`)}`);
+    if (dynUpdate) {
+      saveState(outDir, { ...st, lastLatestId: dyn.latestId, lastCheck: new Date().toISOString() });
+      return { event: 'dyn-update', file: st._dynFile };
+    }
     return { event: 'same', oid, type, comment };
   }
 
-  // 4. 出图
+  // C. 置顶评论换新（旧 rpid 存在且不同）→ 先出旧评论互动回顾图
+  if (st?.lastRpid && st.lastRpid !== comment.rpid && !force) {
+    if (!cfg.quiet) log(`${C.yellow('🔄 置顶评论换新')}，先生成旧评论互动回顾图...`);
+    await generateUnpinnedIfPossible(st, cfg, '置顶评论换新');
+  }
+
+  // D. 出当前置顶评论卡片
   if (!cfg.quiet) log(`${C.yellow('🔄 检测到置顶评论变化，正在生成卡片...')}`);
   let replies = [];
   if (showReplies) {
@@ -229,13 +294,14 @@ async function checkOnce(cfg) {
   saveState(outDir, {
     lastRpid: comment.rpid,
     lastDynId: dyn ? dyn.dynId : (st?.lastDynId || null),
+    lastLatestId: dyn ? dyn.latestId : (st?.lastLatestId || null),
     oid,
     type,
     lastCard: file,
     lastCheck: new Date().toISOString(),
   });
   if (!cfg.quiet) log(`${C.green('✅ 卡片已生成:')} ${file}`);
-  return { event: changed ? 'new' : 'same', oid, type, comment, file };
+  return { event: 'new', oid, type, comment, file };
 }
 
 // ====== 主流程 ======
@@ -255,6 +321,7 @@ async function main() {
     outDir: args.out || saved.outDir || path.join(process.cwd(), 'output'),
     once: args.once,
     force: args.force,
+    trackDyn: args.trackDyn != null ? args.trackDyn : (saved.trackDyn ?? false),
     quiet: args.quiet,
   };
   // 裸参数 oid 可能是链接
@@ -294,6 +361,7 @@ async function main() {
       if (parseInt(iv, 10) >= 10) cfg.interval = parseInt(iv, 10);
     }
     cfg.showReplies = await askYN('卡片上绘制精彩回复', cfg.showReplies);
+    cfg.trackDyn = await askYN('同时监测普通动态更新（置顶未变但发了新动态时提示并出图）', cfg.trackDyn);
     const outAns = await ask('输出目录', cfg.outDir);
     if (outAns) cfg.outDir = outAns;
     const nameAns = await ask('卡片标题显示名（留空自动取 UP 名）', cfg.upName || '');
@@ -303,7 +371,7 @@ async function main() {
     saveConfig({
       uid: cfg.uid, oid: cfg.oid, type: cfg.type, cookie: cfg.cookie,
       upName: cfg.upName, showReplies: cfg.showReplies,
-      interval: cfg.interval, outDir: cfg.outDir,
+      interval: cfg.interval, outDir: cfg.outDir, trackDyn: cfg.trackDyn,
     });
     rl.close();
     rl = null;
@@ -337,7 +405,7 @@ async function main() {
       const t0 = Date.now();
       try {
         const res = await checkOnce(cfg);
-        if (res.event === 'new' && res.file && cfg.quiet) {
+        if (res.file && cfg.quiet) {
           console.log(res.file); // quiet 模式只输出文件路径（方便脚本取用）
         }
       } catch (err) {
