@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const readline = require('readline');
-const { BiliError, getPinnedDynamic, getPinnedComment, getReplies, getCommentDetail, getAllSubReplies, filterUpInteractions } = require('./lib/api');
+const { BiliError, getPinnedDynamic, getPinnedComment, getReplies, getCommentDetail, getDynamicUpper, getAllSubReplies, filterUpInteractions } = require('./lib/api');
 const { generateCard, generateUnpinnedCard, generateDynamicCard } = require('./lib/card');
 
 const VERSION = '1.0.0';
@@ -54,7 +54,7 @@ function parseArgs(argv) {
   const a = {
     uid: null, oid: null, rpid: null, type: null, interval: null, out: null,
     once: false, force: false, showReplies: null, cookie: null,
-    upName: null, quiet: false, trackDyn: null, help: false,
+    upName: null, quiet: false, trackDyn: null, context: false, help: false,
   };
   const set = (k, v) => { a[k] = v; };
   for (let i = 0; i < argv.length; i++) {
@@ -70,6 +70,7 @@ function parseArgs(argv) {
       case '--up-name': set('upName', argv[++i]); break;
       case '--track-dyn': set('trackDyn', true); break;
       case '--no-track-dyn': set('trackDyn', false); break;
+      case '--context': set('context', true); break;
       case '--once': set('once', true); break;
       case '--watch': set('once', false); break;
       case '--force': set('force', true); break;
@@ -91,6 +92,7 @@ const HELP = `
   （无参数）             交互模式：终端提示引导配置后持续监控
   --oid <动态ID或链接>    直接指定动态（含其置顶评论），跳过自动识别
   --rpid <评论ID或链接>   直接绘制指定评论的卡片（如旧的置顶评论，需配合 --oid）
+  --context              与 --rpid 联用：绘制该评论的 UP 互动回顾图（UP 回复/点赞对话链）
   --uid <UP主UID>        目标 UP 主（配合 Cookie 自动识别置顶动态）
   --cookie <SESSDATA>    登录 Cookie（可选）：解锁自动识别置顶动态，降低风控
   --watch                持续监控（默认）
@@ -106,6 +108,7 @@ const HELP = `
 示例:
   node cli.js --oid 404135596 --once --force
   node cli.js --oid 404135596 --rpid 313406396048 --once   # 绘制指定评论（旧置顶等）
+  node cli.js --oid 404135596 --rpid 313406396048 --context --once   # 该评论的 UP 互动回顾图
   node cli.js --uid 401315430 --cookie "SESSDATA=xxx; bili_jct=yyy" --watch -i 120
 `;
 
@@ -217,7 +220,7 @@ async function generateUnpinnedIfPossible(st, cfg, reason) {
 }
 
 async function checkOnce(cfg) {
-  let { uid, oid, rpid, type, cookie, upName, showReplies, outDir, force, trackDyn } = cfg;
+  let { uid, oid, rpid, type, cookie, upName, showReplies, outDir, force, trackDyn, context } = cfg;
   let dyn = null;
 
   // 0. 指定评论 ID（--rpid）：直接绘制该评论卡片（旧的置顶评论等）
@@ -228,6 +231,30 @@ async function checkOnce(cfg) {
     }
     const comment = await getCommentDetail(oid, type || 11, rpid, cookie);
     if (!comment) throw new BiliError(`评论 ${rpid} 不存在或不可访问`);
+    // --context：绘制 UP 互动回顾图（UP 回复/点赞对话链），参考 2568x unpinned-context
+    if (context) {
+      // 未显式指定 --uid 时，自动识别该动态的 UP（评论接口 upper 字段）
+      let upMid = uid;
+      let upLabel = upName || '';
+      if (!cfg.uidExplicit) {
+        const upper = await getDynamicUpper(oid, type || 11, cookie).catch(() => null);
+        if (upper) { upMid = upper.mid; upLabel = upLabel || upper.name; }
+      }
+      if (!cfg.quiet) log(C.dim(`拉取评论 ${rpid} 的全部子回复（UP: ${upLabel || upMid}）...`));
+      const replies = await getAllSubReplies(oid, type || 11, rpid, cookie, 5);
+      const items = filterUpInteractions(replies, upMid || DEFAULT_UID);
+      const replyN = items.filter(i => i.kind === 'reply').length;
+      const likeN = items.filter(i => i.kind === 'like').length;
+      if (!cfg.quiet) log(C.dim(`子回复 ${replies.length} 条, UP 回复 ${replyN} 条, UP 点赞 ${likeN} 条`));
+      const { file } = await generateUnpinnedCard({
+        comment,
+        items,
+        opts: { upName: upLabel || comment.author },
+        outDir,
+      });
+      if (!cfg.quiet) log(`${C.green('✅ UP互动回顾图已生成:')} ${file}`);
+      return { event: 'context', oid, type: type || 11, comment, file, items: items.length };
+    }
     let replies = [];
     if (showReplies) replies = await getReplies(oid, type || 11, comment.rpid, 5, cookie);
     const name = upName || comment.author;
@@ -336,6 +363,7 @@ async function main() {
   const saved = loadConfig();
   const cfg = {
     uid: args.uid || saved.uid || DEFAULT_UID,
+    uidExplicit: !!args.uid,
     oid: args.oid ? String(args.oid) : (saved.oid || ''),
     rpid: args.rpid ? String(args.rpid) : (saved.rpid || ''),
     type: args.type != null ? parseInt(args.type, 10) : (saved.type || 11),
@@ -346,6 +374,7 @@ async function main() {
     outDir: args.out || saved.outDir || path.join(process.cwd(), 'output'),
     once: args.once,
     force: args.force,
+    context: args.context,
     trackDyn: args.trackDyn != null ? args.trackDyn : (saved.trackDyn ?? false),
     quiet: args.quiet,
   };
