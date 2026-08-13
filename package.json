@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node cli.js",
     "test": "node --test",
-    "check": "for f in cli.js lib/*.js test/*.js; do node --check \"$f\" || exit 1; done; echo '✅ 语法检查通过'"
+    "check": "node --check cli.js && node --check lib/api.js && node --check lib/card.js && node --check test/card.test.js && node -e \"console.log('语法检查通过')\""
   },
   "engines": {
     "node": ">=18"
