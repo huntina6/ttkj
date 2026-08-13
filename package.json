@@ -7,13 +7,31 @@
     "bili-pinned-card": "cli.js"
   },
   "scripts": {
-    "start": "node cli.js"
+    "start": "node cli.js",
+    "test": "node --test",
+    "check": "for f in cli.js lib/*.js test/*.js; do node --check \"$f\" || exit 1; done; echo '✅ 语法检查通过'"
   },
   "engines": {
     "node": ">=18"
   },
+  "keywords": [
+    "bilibili",
+    "pinned-comment",
+    "card",
+    "monitor",
+    "cli",
+    "cross-platform"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/huntina6/ttkj.git"
+  },
+  "bugs": {
+    "url": "https://github.com/huntina6/ttkj/issues"
+  },
+  "homepage": "https://github.com/huntina6/ttkj",
+  "license": "MIT",
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2"
-  },
-  "license": "MIT"
+  }
 }
