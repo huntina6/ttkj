@@ -20,7 +20,7 @@ const card = require('../lib/card');
   }
   // 与 cli.js 一致：先下载图片注入
   await card.prepareImages?.(comment, []) || (comment._tokens = card.tokenize(comment.message, comment.emote));
-  const svg = await card.buildSvg(comment, [], { upName: comment.author, upMid: 0 });
+  const svg = await card.buildSvg(comment, [], { upName: comment.author, upMid: 0, oid: Number(oid) });
   fs.writeFileSync(outFile, svg);
   console.log(`SVG 已导出: ${outFile} (${svg.length} 字节, ${svg.match(/height="(\d+)"/)[1]} 高)`);
 })().catch(e => { console.error(e); process.exit(1); });

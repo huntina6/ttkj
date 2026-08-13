@@ -288,7 +288,7 @@ async function checkOnce(cfg) {
   const { file } = await generateCard({
     comment,
     replies,
-    opts: { upName: name, upMid: uid, showReplies },
+    opts: { upName: name, upMid: uid, showReplies, oid },
     outDir,
   });
   saveState(outDir, {
