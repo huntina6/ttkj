@@ -208,7 +208,7 @@ async function generateUnpinnedIfPossible(st, cfg, reason) {
     const { file } = await generateUnpinnedCard({
       comment: detail,
       items,
-      opts: { upName: cfg.upName },
+      opts: { upName: cfg.upName, oid: oldOid },
       outDir: cfg.outDir,
     });
     if (!cfg.quiet) log(`${C.green('✅ 互动回顾图')} (${reason}): ${file}`);
@@ -249,7 +249,7 @@ async function checkOnce(cfg) {
       const { file } = await generateUnpinnedCard({
         comment,
         items,
-        opts: { upName: upLabel || comment.author },
+        opts: { upName: upLabel || comment.author, oid },
         outDir,
       });
       if (!cfg.quiet) log(`${C.green('✅ UP互动回顾图已生成:')} ${file}`);
@@ -304,7 +304,7 @@ async function checkOnce(cfg) {
     try {
       const { file } = await generateDynamicCard({
         dyn,
-        opts: { upName: upName || dyn.latestAuthor || dyn.author },
+        opts: { upName: upName || dyn.latestAuthor || dyn.author, oid: dyn.latestId },
         outDir,
       });
       if (!cfg.quiet) log(`${C.green('✅ 动态更新卡片:')} ${file}`);
