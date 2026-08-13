@@ -5,6 +5,7 @@
 ## [1.0.1] - 2026-08-13
 
 ### 修复
+- 移除主卡片底部统计栏（❤ 赞 / 条回复 / 分隔线），卡片更简洁
 - 卡片文字整体右移：`lineToSvg` 对字符宽度双重累加，导致整行 `<text>` 起点偏移整行宽度（一行越满歪得越狠）
 - 头像/图片网格被完全裁剪：`clipPath` 默认 `userSpaceOnUse` 坐标系，圆形裁剪定义在原点 `(0,0)` 而图片在卡片中部，两区域不相交 → 头像不显示；改用 `clipPathUnits="objectBoundingBox"` 相对裁剪
 - `npm run check` 原为 bash for 循环，Windows 下无法运行；改为跨平台 `node --check` 链
