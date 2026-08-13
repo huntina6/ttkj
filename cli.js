@@ -52,7 +52,7 @@ const BANNER = `
 // ====== 参数解析 ======
 function parseArgs(argv) {
   const a = {
-    uid: null, oid: null, type: null, interval: null, out: null,
+    uid: null, oid: null, rpid: null, type: null, interval: null, out: null,
     once: false, force: false, showReplies: null, cookie: null,
     upName: null, quiet: false, trackDyn: null, help: false,
   };
@@ -62,6 +62,7 @@ function parseArgs(argv) {
     switch (arg) {
       case '--uid': case '-u': set('uid', argv[++i]); break;
       case '--oid': set('oid', argv[++i]); break;
+      case '--rpid': set('rpid', argv[++i]); break;
       case '--type': case '-t': set('type', argv[++i]); break;
       case '--interval': case '-i': set('interval', argv[++i]); break;
       case '--out': case '-o': set('out', argv[++i]); break;
@@ -89,6 +90,7 @@ const HELP = `
 
   （无参数）             交互模式：终端提示引导配置后持续监控
   --oid <动态ID或链接>    直接指定动态（含其置顶评论），跳过自动识别
+  --rpid <评论ID或链接>   直接绘制指定评论的卡片（如旧的置顶评论，需配合 --oid）
   --uid <UP主UID>        目标 UP 主（配合 Cookie 自动识别置顶动态）
   --cookie <SESSDATA>    登录 Cookie（可选）：解锁自动识别置顶动态，降低风控
   --watch                持续监控（默认）
@@ -103,6 +105,7 @@ const HELP = `
 
 示例:
   node cli.js --oid 404135596 --once --force
+  node cli.js --oid 404135596 --rpid 313406396048 --once   # 绘制指定评论（旧置顶等）
   node cli.js --uid 401315430 --cookie "SESSDATA=xxx; bili_jct=yyy" --watch -i 120
 `;
 
@@ -214,8 +217,29 @@ async function generateUnpinnedIfPossible(st, cfg, reason) {
 }
 
 async function checkOnce(cfg) {
-  let { uid, oid, type, cookie, upName, showReplies, outDir, force, trackDyn } = cfg;
+  let { uid, oid, rpid, type, cookie, upName, showReplies, outDir, force, trackDyn } = cfg;
   let dyn = null;
+
+  // 0. 指定评论 ID（--rpid）：直接绘制该评论卡片（旧的置顶评论等）
+  if (rpid) {
+    if (!oid) {
+      if (!cfg.quiet) log(C.red('✗ --rpid 模式需要同时指定 --oid'));
+      return { event: 'error', oid: null };
+    }
+    const comment = await getCommentDetail(oid, type || 11, rpid, cookie);
+    if (!comment) throw new BiliError(`评论 ${rpid} 不存在或不可访问`);
+    let replies = [];
+    if (showReplies) replies = await getReplies(oid, type || 11, comment.rpid, 5, cookie);
+    const name = upName || comment.author;
+    const { file } = await generateCard({
+      comment,
+      replies,
+      opts: { upName: name, upMid: uid, showReplies, oid },
+      outDir,
+    });
+    if (!cfg.quiet) log(`${C.green('✅ 评论卡片已生成:')} ${file}`);
+    return { event: 'manual', oid, type: type || 11, comment, file };
+  }
 
   // 1. 确定 oid（未指定时用 Cookie 自动识别置顶动态）
   if (!oid) {
@@ -313,6 +337,7 @@ async function main() {
   const cfg = {
     uid: args.uid || saved.uid || DEFAULT_UID,
     oid: args.oid ? String(args.oid) : (saved.oid || ''),
+    rpid: args.rpid ? String(args.rpid) : (saved.rpid || ''),
     type: args.type != null ? parseInt(args.type, 10) : (saved.type || 11),
     cookie: args.cookie != null ? args.cookie : (saved.cookie || ''),
     upName: args.upName || saved.upName || '',
@@ -324,10 +349,14 @@ async function main() {
     trackDyn: args.trackDyn != null ? args.trackDyn : (saved.trackDyn ?? false),
     quiet: args.quiet,
   };
-  // 裸参数 oid 可能是链接
+  // 裸参数 oid / rpid 可能是链接 → 提取数字 ID
   if (cfg.oid) {
-    const m = String(cfg.oid).match(/dynamic\/(\d+)/);
+    const m = String(cfg.oid).match(/(?:t\.bilibili\.com|bilibili\.com)\/(?:dynamic\/)?(\d+)/);
     if (m) cfg.oid = m[1];
+  }
+  if (cfg.rpid) {
+    const m = String(cfg.rpid).match(/comment_root_id=(\d+)|comment_id=(\d+)|#reply(\d+)/);
+    if (m) cfg.rpid = m[1] || m[2] || m[3];
   }
   if (!Number.isFinite(cfg.interval) || cfg.interval < 10) cfg.interval = 60;
 
