@@ -18,7 +18,7 @@ const readline = require('readline');
 const { BiliError, getPinnedDynamic, getPinnedComment, getReplies, getCommentDetail, getDynamicUpper, getAllSubReplies, filterUpInteractions } = require('./lib/api');
 const { generateCard, generateUnpinnedCard, generateDynamicCard } = require('./lib/card');
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const CFG_DIR = path.join(os.homedir(), '.bili-pinned-card');
 const CFG_FILE = path.join(CFG_DIR, 'config.json');
 const DEFAULT_UID = '401315430';
