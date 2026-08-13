@@ -171,6 +171,26 @@ bili-pinned-card/
 └── output/                 # 出图目录（运行时生成）
 ```
 
+## 发布新版本（版本追溯）
+
+每次版本更新按以下流程操作，GitHub Actions 会自动完成 Release 与发布：
+
+```bash
+# 1. 更新 package.json 的 version（如 1.1.0 → 1.2.0）与 cli.js 的 VERSION
+# 2. 在 CHANGELOG.md 顶部新增对应版本段落（[1.2.0] - 日期 + 新增/修复清单）
+# 3. 提交后打 tag 并推送（tag 名 = 版本号，带 v 前缀）
+git tag -a v1.2.0 -m "v1.2.0"
+git push origin --tags
+```
+
+推送 `v*` tag 后，`.github/workflows/release.yml` 自动执行：
+1. ✅ 校验 `package.json` 版本与 tag 一致（不一致则失败，防止漏改）
+2. ✅ 运行测试
+3. ✅ 从 `CHANGELOG.md` 提取该版本段落，创建 **GitHub Release**（Releases 页可追溯）
+4. ✅ 发布 npm 包到 **GitHub Packages**（`@huntina6/bili-pinned-card`）
+
+历史版本：v1.0.0 / v1.0.1 / v1.1.0 已按此流程建档。
+
 ## 相关项目
 
 - [2568x 星星的瞳](https://github.com/huntina6/2568x)：B站账号活动监测与动态归档工具包（本项目的 UP 互动回顾思路参考其 `unpinned-context-image.js`，本项目的纯 Node/SVG 实现不依赖浏览器）
