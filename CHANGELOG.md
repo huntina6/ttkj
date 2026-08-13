@@ -2,6 +2,17 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 格式，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.1] - 2026-08-13
+
+### 修复
+- 卡片文字整体右移：`lineToSvg` 对字符宽度双重累加，导致整行 `<text>` 起点偏移整行宽度（一行越满歪得越狠）
+- 头像/图片网格被完全裁剪：`clipPath` 默认 `userSpaceOnUse` 坐标系，圆形裁剪定义在原点 `(0,0)` 而图片在卡片中部，两区域不相交 → 头像不显示；改用 `clipPathUnits="objectBoundingBox"` 相对裁剪
+- `npm run check` 原为 bash for 循环，Windows 下无法运行；改为跨平台 `node --check` 链
+
+### 新增
+- 回归测试 ×2：`clipPath` 使用 objectBoundingBox + 渲染后像素级断言（头像区域可见、正文起点对齐）
+- `scripts/verify-pixels.js`：PNG 像素检查脚本，快速验证卡片布局
+
 ## [1.0.0] - 2026-08-13
 
 ### 新增

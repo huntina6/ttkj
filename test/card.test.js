@@ -198,3 +198,102 @@ test('renderPng 输出有效 PNG', () => {
   assert.strictEqual(png[2], 0x4e);
   assert.strictEqual(png[3], 0x47);
 });
+
+// ====== 回归测试：卡片渲染布局（issue: 头像不显示 / 正文偏移） ======
+
+/** 构造最小 comment（可指定 avatar data URI 与正文） */
+function mkComment(extra = {}) {
+  return {
+    rpid: '313472209520', author: '测试UP', ctime: 1754985600,
+    like: 42, rcount: 7, message: '一二三四五六七八九十一二三四五六七八九十',
+    emote: {}, pictures: [], avatar: '',
+    _tokens: [{ type: 'text', text: '一二三四五六七八九十一二三四五六七八九十' }],
+    _emoteImgs: {}, _picImgs: [],
+    ...extra,
+  };
+}
+
+/** 轻量 PNG 像素解析（RGBA8） */
+function parsePng(buf) {
+  let off = 8, width = 0, height = 0, idat = [];
+  while (off < buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString('ascii', off + 4, off + 8);
+    if (type === 'IHDR') { width = buf.readUInt32BE(off + 8); height = buf.readUInt32BE(off + 12); }
+    else if (type === 'IDAT') idat.push(buf.subarray(off + 8, off + 8 + len));
+    else if (type === 'IEND') break;
+    off += 12 + len;
+  }
+  const raw = require('zlib').inflateSync(Buffer.concat(idat));
+  const bpp = 4, stride = width * bpp;
+  const px = Buffer.alloc(width * height * 4);
+  let src = 0;
+  for (let y = 0; y < height; y++) {
+    const filter = raw[src++];
+    const row = px.subarray(y * stride, (y + 1) * stride);
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? row[x - bpp] : 0;
+      const b = y > 0 ? px[(y - 1) * stride + x] : 0;
+      const c = (x >= bpp && y > 0) ? px[(y - 1) * stride + x - bpp] : 0;
+      let v = raw[src++];
+      if (filter === 1) v = (v + a) & 0xff;
+      else if (filter === 2) v = (v + b) & 0xff;
+      else if (filter === 3) v = (v + ((a + b) >> 1)) & 0xff;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        v = (v + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xff;
+      }
+      row[x] = v;
+    }
+  }
+  return { width, height, px };
+}
+
+/** 区域统计：返回 [平均R, 平均G, 平均B]（忽略透明像素） */
+function regionAvg(img, x0, y0, w, h) {
+  let n = 0, r = 0, g = 0, b = 0;
+  for (let y = y0; y < Math.min(y0 + h, img.height); y++)
+    for (let x = Math.max(0, x0); x < Math.min(x0 + w, img.width); x++) {
+      const i = (y * img.width + x) * 4;
+      if (img.px[i + 3] < 128) continue;
+      n++; r += img.px[i]; g += img.px[i + 1]; b += img.px[i + 2];
+    }
+  return n ? [r / n, g / n, b / n] : null;
+}
+
+test('回归：clipPath 使用 objectBoundingBox（头像不被裁剪）', async () => {
+  const svg = await card.buildSvg(mkComment(), [], {});
+  assert.ok(svg.includes('clipPathUnits="objectBoundingBox"'));
+  // 正文首个 <text> 应从 INNER_X=52 开始（修复前会右移整行宽度）
+  assert.ok(/<text x="52" y="[0-9.]+" font-size="15.5"/.test(svg),
+    `正文 text 起点应为 52，实际 SVG: ${svg.match(/<text x="[^"]+" y="[^"]+" font-size="15.5"/)?.[0] || '未找到'}`);
+});
+
+test('回归：渲染后头像区域可见且正文起点对齐', async () => {
+  // 用 resvg 自己生成 8x8 红色小图作为头像 data URI（无网络依赖）
+  const tiny = card.renderPng('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#ff0000"/></svg>', 1);
+  const avatarUri = `data:image/png;base64,${tiny.toString('base64')}`;
+  const svg = await card.buildSvg(mkComment({ avatar: avatarUri }), [], {});
+  const png = card.renderPng(svg);
+  const img = parsePng(png);
+  const scale = img.width / card.W; // 2x
+  const s = v => Math.round(v * scale);
+  const INNER_X = 52, avatarY = 92, avatarR = 23, bodyBaseline = 165.9;
+
+  // 1) 头像圆心处应为红色（圆形裁剪区域内），修复前整个头像被裁掉
+  const center = regionAvg(img, s(INNER_X + avatarR) - 2, s(avatarY + avatarR) - 2, 4, 4);
+  assert.ok(center, '头像圆心区域应有像素');
+  assert.ok(center[0] > 150 && center[1] < 100, `头像圆心应为红色，实际 ${center.map(v => v.toFixed(0))}`);
+
+  // 2) 正文首行最左亮像素应贴近 INNER_X（修复前右移整行宽度）
+  let firstX = -1;
+  outer:
+  for (let x = s(40); x < s(200); x++)
+    for (let y = s(bodyBaseline - 6); y <= s(bodyBaseline + 2); y++) {
+      const i = (y * img.width + x) * 4;
+      if (img.px[i] + img.px[i + 1] + img.px[i + 2] > 500) { firstX = x; break outer; }
+    }
+  assert.ok(firstX >= 0, '首行应有文字像素');
+  assert.ok(firstX <= s(INNER_X) + 6, `首行文字起点应贴近 ${s(INNER_X)}，实际 ${firstX}`);
+});
