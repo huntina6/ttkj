@@ -60,6 +60,7 @@ jobs:
           body: "${{ steps.notes.outputs.notes }}"
           draft: false
           prerelease: false
+          update: true
 
       - name: Publish to GitHub Packages (npm)
         run: |
