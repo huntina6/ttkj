@@ -157,12 +157,6 @@ function ask(question, def) {
     });
   });
 }
-async function askYN(question, def = false) {
-  const hint = def ? 'Y/n' : 'y/N';
-  const ans = (await ask(`${question} (${hint})`, '')).toLowerCase();
-  if (ans === '') return def;
-  return ans === 'y' || ans === 'yes';
-}
 /** 交互分区标题：┌─ 标题 ─────────────────┐ */
 function section(title) {
   const fill = '─'.repeat(Math.max(2, BOX_W - displayWidth(title) - 4));
@@ -208,6 +202,50 @@ function select(options, defaultIndex = 0, io = { stdin: process.stdin, stdout: 
         render();
       } else if (ch === '\x1b[B') {            // ↓
         idx = (idx + 1) % options.length;
+        render();
+      }
+    };
+    const wasRaw = stdin.isRaw;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    stdin.on('data', onData);
+  });
+}
+/**
+ * 横排 是/否 选择器：←/→（或 ↑/↓、空格）切换，回车确认
+ * @param {string} question 提问文本
+ * @param {boolean} def 默认值
+ * @returns {Promise<boolean>}
+ */
+function selectYN(question, def = false, io = { stdin: process.stdin, stdout: process.stdout }) {
+  return new Promise(resolve => {
+    const stdin = io.stdin;
+    const stdout = io.stdout;
+    let yes = !!def;
+    const render = () => {
+      const yesTxt = yes ? `${C.bold(C.cyan('❯ 是'))}` : C.dim('  是');
+      const noTxt = yes ? C.dim('  否') : `${C.bold(C.cyan('❯ 否'))}`;
+      stdout.write(`\x1b[2K${C.cyan('➤')} ${C.cyan(question)}  ${yesTxt}  ${noTxt}\r`);
+    };
+    render();
+    const cleanup = () => {
+      stdin.removeListener('data', onData);
+      try { stdin.setRawMode(wasRaw); } catch { /* noop */ }
+      stdin.pause();
+      stdout.write('\n');
+    };
+    const onData = ch => {
+      if (ch === '\r' || ch === '\n') {
+        cleanup();
+        resolve(yes);
+      } else if (ch === 'y' || ch === 'Y' || ch === '\x1b[C' || ch === '\x1b[B' || ch === ' ') {
+        if (ch === 'y' || ch === 'Y') yes = true;
+        else yes = !yes;
+        render();
+      } else if (ch === 'n' || ch === 'N' || ch === '\x1b[D' || ch === '\x1b[A') {
+        if (ch === 'n' || ch === 'N') yes = false;
+        else yes = !yes;
         render();
       }
     };
@@ -518,11 +556,11 @@ async function main() {
       const iv = await ask('检查间隔（秒）', String(cfg.interval));
       if (parseInt(iv, 10) >= 10) cfg.interval = parseInt(iv, 10);
     }
-    cfg.trackDyn = await askYN('同时监测普通动态更新（置顶未变但发了新动态时提示并出图）', cfg.trackDyn);
+    cfg.trackDyn = await selectYN('同时监测普通动态更新（置顶未变但发了新动态时提示并出图）', cfg.trackDyn);
 
     // —— 卡片与输出 ——
     section('卡片与输出');
-    cfg.showReplies = await askYN('卡片上绘制精彩回复', cfg.showReplies);
+    cfg.showReplies = await selectYN('卡片上绘制精彩回复', cfg.showReplies);
     const outAns = await ask('输出目录', cfg.outDir);
     if (outAns) cfg.outDir = outAns;
     const nameAns = await ask('卡片标题显示名（留空自动取 UP 名）', cfg.upName || '');
