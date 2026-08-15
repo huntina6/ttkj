@@ -42,11 +42,34 @@ function log(msg) {
   console.log(`[${ts()}] ${msg}`);
 }
 
+// ====== 终端对齐工具（CJK 全角按 2 列宽，避免横幅/表格歪斜） ======
+function stripAnsi(s) {
+  return String(s).replace(/\x1b\[[0-9;]*m/g, '');
+}
+/** 终端显示宽度：CJK/全角=2 列，其余=1 列；ANSI 颜色转义不计宽 */
+function displayWidth(s) {
+  let w = 0;
+  for (const ch of stripAnsi(s)) {
+    const cp = ch.codePointAt(0);
+    if ((cp >= 0x2e80 && cp <= 0x9fff) || (cp >= 0xf900 && cp <= 0xfaff) ||
+        (cp >= 0xff00 && cp <= 0xffef) || (cp >= 0x20000 && cp <= 0x2ffff)) w += 2;
+    else w += 1;
+  }
+  return w;
+}
+
+const BOX_W = 44; // 横幅内容区宽度（显示列）
+const boxBorder = (left, right) => `${left}${'═'.repeat(BOX_W)}${right}`;
+const boxLine = text => {
+  const pad = Math.max(0, BOX_W - displayWidth(text) - 4);
+  return `║  ${text}${' '.repeat(pad)}  ║`;
+};
+
 const BANNER = `
-╔══════════════════════════════════════════════╗
-║   ${C.bold(C.pink('B站 置顶评论监测 · 自动出图'))} v${VERSION}              ║
-║   ${C.dim('全平台独立版 · 无需浏览器 · 无需登录')}               ║
-╚══════════════════════════════════════════════╝
+${boxBorder('╔', '╗')}
+${boxLine(`${C.bold(C.pink('B站 置顶评论监测 · 自动出图'))} v${VERSION}`)}
+${boxLine(C.dim('全平台独立版 · 无需浏览器 · 无需登录'))}
+${boxBorder('╚', '╝')}
 `;
 
 // ====== 参数解析 ======
