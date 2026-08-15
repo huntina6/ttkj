@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -46,7 +47,8 @@ jobs:
           NOTES=$(node -e "
             const fs = require('fs');
             const md = fs.readFileSync('CHANGELOG.md', 'utf-8');
-            const esc = s => s.replace(/%/g, '%25').replace(/\n/g, '%0A').replace(/\r/g, '%0D');
+            // 注意：GitHub Actions 对 $GITHUB_OUTPUT 只解码 %0D%0A（CRLF），单独 %0A 会以字面量泄漏进 Release notes
+            const esc = s => s.replace(/%/g, '%25').replace(/\r\n/g, '%0D%0A').replace(/\n/g, '%0D%0A').replace(/\r/g, '%0D');
             const re = new RegExp('## \\\\[' + '${VER}' + '\\\\][\\\\s\\\\S]*?(?=\\\\n## \\\\[|\\$)');
             const m = md.match(re);
             process.stdout.write(m ? esc(m[0]) : esc('详见 CHANGELOG.md'));
