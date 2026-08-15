@@ -151,7 +151,7 @@ let rl = null;
 function ask(question, def) {
   return new Promise(resolve => {
     const suffix = def !== undefined && def !== '' ? C.dim(` [${def}]`) : '';
-    rl.question(`${C.cyan('➤')} ${C.cyan(question)}${suffix} `, ans => {
+    rl.question(`${C.bold(C.pink('➤'))} ${C.cyan(question)}${suffix} `, ans => {
       const v = ans.trim();
       resolve(v === '' ? def : v);
     });
@@ -178,8 +178,8 @@ function select(options, defaultIndex = 0, io = { stdin: process.stdin, stdout: 
     const stdout = io.stdout;
     let idx = Math.min(Math.max(defaultIndex, 0), options.length - 1);
     const line = i => (i === idx
-      ? `  ${C.cyan('❯')} ${C.bold(options[i].label)}${options[i].desc ? `  ${C.dim(options[i].desc)}` : ''}`
-      : `    ${options[i].label}${options[i].desc ? `  ${C.dim(options[i].desc)}` : ''}`);
+      ? `  ${C.bold(C.pink('❯'))} ${C.bold(options[i].label)}${options[i].desc ? `  ${C.dim(options[i].desc)}` : ''}`
+      : `    ${C.dim(options[i].label)}${options[i].desc ? `  ${C.dim(options[i].desc)}` : ''}`);
     const render = () => {
       stdout.write(`\x1b[${options.length}A`); // 光标回到选项区顶部
       for (let i = 0; i < options.length; i++) {
@@ -190,7 +190,7 @@ function select(options, defaultIndex = 0, io = { stdin: process.stdin, stdout: 
     const cleanup = () => {
       stdin.removeListener('data', onData);
       try { stdin.setRawMode(wasRaw); } catch { /* noop */ }
-      stdin.pause();
+      // 注意：不能 pause stdin——readline 后续 rl.question 依赖 data 事件继续流动
     };
     const onData = ch => {
       if (ch === '\r' || ch === '\n') {
@@ -224,15 +224,15 @@ function selectYN(question, def = false, io = { stdin: process.stdin, stdout: pr
     const stdout = io.stdout;
     let yes = !!def;
     const render = () => {
-      const yesTxt = yes ? `${C.bold(C.cyan('❯ 是'))}` : C.dim('  是');
-      const noTxt = yes ? C.dim('  否') : `${C.bold(C.cyan('❯ 否'))}`;
-      stdout.write(`\x1b[2K${C.cyan('➤')} ${C.cyan(question)}  ${yesTxt}  ${noTxt}\r`);
+      const yesTxt = yes ? `${C.bold(C.pink('❯ 是'))}` : C.dim('  是');
+      const noTxt = yes ? C.dim('  否') : `${C.bold(C.pink('❯ 否'))}`;
+      stdout.write(`\x1b[2K${C.bold(C.pink('➤'))} ${C.cyan(question)}  ${yesTxt}  ${noTxt}\r`);
     };
     render();
     const cleanup = () => {
       stdin.removeListener('data', onData);
       try { stdin.setRawMode(wasRaw); } catch { /* noop */ }
-      stdin.pause();
+      // 注意：不能 pause stdin——readline 后续 rl.question 依赖 data 事件继续流动
       stdout.write('\n');
     };
     const onData = ch => {
