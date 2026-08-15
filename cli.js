@@ -172,6 +172,52 @@ function section(title) {
 function summaryRow(k, v) {
   console.log(`  ${C.dim(k.padEnd(4))}${C.bold(String(v))}`);
 }
+/**
+ * 方向键选择器：↑/↓ 移动高亮光标，回车确认
+ * @param {Array<{key:string, label:string, desc?:string}>} options
+ * @param {number} defaultIndex 初始高亮位置
+ * @returns {Promise<string>} 选中项的 key
+ */
+function select(options, defaultIndex = 0, io = { stdin: process.stdin, stdout: process.stdout }) {
+  return new Promise(resolve => {
+    const stdin = io.stdin;
+    const stdout = io.stdout;
+    let idx = Math.min(Math.max(defaultIndex, 0), options.length - 1);
+    const line = i => (i === idx
+      ? `  ${C.cyan('❯')} ${C.bold(options[i].label)}${options[i].desc ? `  ${C.dim(options[i].desc)}` : ''}`
+      : `    ${options[i].label}${options[i].desc ? `  ${C.dim(options[i].desc)}` : ''}`);
+    const render = () => {
+      stdout.write(`\x1b[${options.length}A`); // 光标回到选项区顶部
+      for (let i = 0; i < options.length; i++) {
+        stdout.write(`\x1b[2K${line(i)}\n`);   // 清行并重绘
+      }
+    };
+    for (let i = 0; i < options.length; i++) stdout.write(`${line(i)}\n`);
+    const cleanup = () => {
+      stdin.removeListener('data', onData);
+      try { stdin.setRawMode(wasRaw); } catch { /* noop */ }
+      stdin.pause();
+    };
+    const onData = ch => {
+      if (ch === '\r' || ch === '\n') {
+        cleanup();
+        stdout.write('\n');
+        resolve(options[idx].key);
+      } else if (ch === '\x1b[A') {            // ↑
+        idx = (idx - 1 + options.length) % options.length;
+        render();
+      } else if (ch === '\x1b[B') {            // ↓
+        idx = (idx + 1) % options.length;
+        render();
+      }
+    };
+    const wasRaw = stdin.isRaw;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    stdin.on('data', onData);
+  });
+}
 /** 静默输入（用于 Cookie，不回显） */
 function askSilent(question) {
   return new Promise(resolve => {
@@ -432,12 +478,14 @@ async function main() {
     console.log(BANNER);
     rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-    // —— 模式选择（卡片式） ——
+    // —— 模式选择（↑/↓ 移动光标，回车确认） ——
     section('运行模式');
-    console.log(`  ${C.cyan('1')}  ${C.bold('持续监控')}（默认）  ${C.dim('检测到置顶评论变化自动出图')}`);
-    console.log(`  ${C.cyan('2')}  ${C.bold('单次检查')}          ${C.dim('立即检查并出图一次')}`);
-    console.log(`  ${C.cyan('0')}  ${C.bold('退出')}`);
-    const mode = await ask('选择', '1');
+    console.log(C.dim('  ↑/↓ 选择，回车确认'));
+    const mode = await select([
+      { key: '1', label: '持续监控', desc: '检测到置顶评论变化自动出图（默认）' },
+      { key: '2', label: '单次检查', desc: '立即检查并出图一次' },
+      { key: '0', label: '退出', desc: '' },
+    ], 0);
     if (mode === '0') { console.log('\n再见 👋'); rl.close(); return; }
     cfg.once = mode === '2';
 
