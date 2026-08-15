@@ -18,8 +18,8 @@ const card = require('../lib/card');
     console.error('未获取到置顶评论（可能未置顶或风控）');
     process.exit(1);
   }
-  // 与 cli.js 一致：先下载图片注入
-  await card.prepareImages?.(comment, []) || (comment._tokens = card.tokenize(comment.message, comment.emote));
+  // 与 cli.js 一致：先下载图片注入（头像/表情/评论图转 data URI）
+  await card.prepareImages(comment, []);
   const svg = await card.buildSvg(comment, [], { upName: comment.author, upMid: 0, oid: Number(oid) });
   fs.writeFileSync(outFile, svg);
   console.log(`SVG 已导出: ${outFile} (${svg.length} 字节, ${svg.match(/height="(\d+)"/)[1]} 高)`);

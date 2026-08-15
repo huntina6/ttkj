@@ -171,6 +171,17 @@ function maskCookie(c) {
   return c.replace(/(SESSDATA)=([^;]{6})[^;]*/, '$1=$2****');
 }
 
+/** 从链接/裸输入中提取动态 ID 或评论 ID（提取失败原样返回） */
+function extractId(v) {
+  const s = String(v || '').trim();
+  if (!s) return s;
+  const dyn = s.match(/(?:t\.bilibili\.com|bilibili\.com)\/(?:dynamic\/)?(\d+)/);
+  if (dyn) return dyn[1];
+  const rep = s.match(/comment_root_id=(\d+)|comment_id=(\d+)|#reply(\d+)/);
+  if (rep) return rep[1] || rep[2] || rep[3];
+  return s;
+}
+
 // ====== 状态 ======
 function stateFile(outDir) {
   return path.join(outDir, 'state.json');
@@ -208,7 +219,7 @@ async function generateUnpinnedIfPossible(st, cfg, reason) {
     const { file } = await generateUnpinnedCard({
       comment: detail,
       items,
-      opts: { upName: cfg.upName, oid: oldOid },
+      opts: { upName: cfg.upName, oid: oldOid, upMid: cfg.uid },
       outDir: cfg.outDir,
     });
     if (!cfg.quiet) log(`${C.green('✅ 互动回顾图')} (${reason}): ${file}`);
@@ -249,7 +260,7 @@ async function checkOnce(cfg) {
       const { file } = await generateUnpinnedCard({
         comment,
         items,
-        opts: { upName: upLabel || comment.author, oid },
+        opts: { upName: upLabel || comment.author, oid, upMid: upMid || DEFAULT_UID },
         outDir,
       });
       if (!cfg.quiet) log(`${C.green('✅ UP互动回顾图已生成:')} ${file}`);
@@ -379,15 +390,10 @@ async function main() {
     quiet: args.quiet,
   };
   // 裸参数 oid / rpid 可能是链接 → 提取数字 ID
-  if (cfg.oid) {
-    const m = String(cfg.oid).match(/(?:t\.bilibili\.com|bilibili\.com)\/(?:dynamic\/)?(\d+)/);
-    if (m) cfg.oid = m[1];
-  }
-  if (cfg.rpid) {
-    const m = String(cfg.rpid).match(/comment_root_id=(\d+)|comment_id=(\d+)|#reply(\d+)/);
-    if (m) cfg.rpid = m[1] || m[2] || m[3];
-  }
+  if (cfg.oid) cfg.oid = extractId(cfg.oid);
+  if (cfg.rpid) cfg.rpid = extractId(cfg.rpid);
   if (!Number.isFinite(cfg.interval) || cfg.interval < 10) cfg.interval = 60;
+  if (!Number.isFinite(cfg.type)) cfg.type = 11;
 
   // ---- 交互模式：终端提示引导 ----
   if (process.stdin.isTTY && !args.oid && args.cookie == null) {
@@ -408,7 +414,7 @@ async function main() {
     if (cookieAns) cfg.cookie = cookieAns;
 
     const oidAns = await ask('动态链接或 ID（可选，留空则自动识别置顶动态）', cfg.oid || '');
-    if (oidAns) cfg.oid = String(oidAns).match(/dynamic\/(\d+)/)?.[1] || String(oidAns);
+    if (oidAns) cfg.oid = extractId(oidAns);
 
     if (!cfg.oid && !cfg.cookie) {
       console.log(C.yellow('  ⚠ 未提供 Cookie 时自动识别置顶动态可能被风控（-352），届时程序会提示你补充。'));
@@ -463,6 +469,7 @@ async function main() {
       const t0 = Date.now();
       try {
         const res = await checkOnce(cfg);
+        if (res.event === 'error') break; // 参数错误（如 --rpid 缺 --oid），继续循环只会重复报错
         if (res.file && cfg.quiet) {
           console.log(res.file); // quiet 模式只输出文件路径（方便脚本取用）
         }

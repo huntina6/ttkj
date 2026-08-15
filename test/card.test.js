@@ -148,6 +148,32 @@ test('filterUpInteractions 无互动', () => {
   assert.deepStrictEqual(filterUpInteractions([], 401315430), []);
 });
 
+test('回归：uid 为字符串时 UP 互动也能匹配（P0 类型不匹配修复）', () => {
+  // cli.js 传入的 uid 是字符串（如 '401315430'），而 API 返回的 mid 是 number；
+  // 修复前 `r.mid === uid` 恒为 false，UP 互动永远识别不到
+  const replies = [
+    mkReply('400', 401315430),                        // UP 自己的回复（number mid）
+    mkReply('401', 123456, { liked: true }),          // 被 UP 点赞的粉丝评论
+    mkReply('402', 401315430, { liked: true }),       // UP 自己的回复被点赞 → 只计 reply，不重复计 like
+  ];
+  const items = filterUpInteractions(replies, '401315430'); // 字符串 uid
+  // 期望：reply×2（400、402）+ like×1（401）= 3 项
+  assert.strictEqual(items.length, 3, '字符串 uid 应识别出 UP 回复与 UP 点赞');
+  const replyItems = items.filter(i => i.kind === 'reply');
+  const likeItems = items.filter(i => i.kind === 'like');
+  assert.strictEqual(replyItems.length, 2, 'UP 回复应为 2 条（400、402）');
+  assert.ok(replyItems.every(i => i.upReply && i.upReply.rpid !== undefined));
+  assert.strictEqual(likeItems.length, 1, 'UP 点赞应为 1 条（401，UP 自己的 402 不重复计）');
+  assert.strictEqual(likeItems[0].parent.rpid, '401');
+});
+
+test('回归：uid 为数字时行为不变', () => {
+  const replies = [mkReply('500', 401315430)];
+  const items = filterUpInteractions(replies, 401315430);
+  assert.strictEqual(items.length, 1);
+  assert.strictEqual(items[0].kind, 'reply');
+});
+
 // ====== extractDynamicContent ======
 test('extractDynamicContent DRAW 图片动态', () => {
   const item = {
@@ -268,6 +294,21 @@ test('回归：clipPath 使用 objectBoundingBox（头像不被裁剪）', async
   // 正文首个 <text> 应从 INNER_X=52 开始（修复前会右移整行宽度）
   assert.ok(/<text x="52" y="[0-9.]+" font-size="15.5"/.test(svg),
     `正文 text 起点应为 52，实际 SVG: ${svg.match(/<text x="[^"]+" y="[^"]+" font-size="15.5"/)?.[0] || '未找到'}`);
+});
+
+test('回归：UP主 徽标仅在评论作者为目标 UP 时显示（P1 无条件徽标修复）', async () => {
+  // 粉丝发的置顶评论：不应显示 UP主 徽标
+  const fan = await card.buildSvg(mkComment({ mid: 999999 }), [], { upMid: 401315430 });
+  assert.ok(!fan.includes('>UP主</text>'), '粉丝评论不应出现 UP主 徽标');
+  // 目标 UP 自己的评论：应显示 UP主 徽标
+  const up = await card.buildSvg(mkComment({ mid: 401315430 }), [], { upMid: 401315430 });
+  assert.ok(up.includes('>UP主</text>'), 'UP 自己的评论应显示 UP主 徽标');
+  // 未提供 upMid 时：不显示徽标（无判断依据）
+  const noUp = await card.buildSvg(mkComment({ mid: 401315430 }), [], {});
+  assert.ok(!noUp.includes('>UP主</text>'), '未提供 upMid 时不应显示 UP主 徽标');
+  // 字符串 upMid 与数字 mid 也能匹配（类型一致性）
+  const strUp = await card.buildSvg(mkComment({ mid: 401315430 }), [], { upMid: '401315430' });
+  assert.ok(strUp.includes('>UP主</text>'), '字符串 upMid 应匹配数字 mid');
 });
 
 test('回归：渲染后头像区域可见且正文起点对齐', async () => {
