@@ -151,7 +151,7 @@ let rl = null;
 function ask(question, def) {
   return new Promise(resolve => {
     const suffix = def !== undefined && def !== '' ? C.dim(` [${def}]`) : '';
-    rl.question(C.cyan(question) + suffix + ' ', ans => {
+    rl.question(`${C.cyan('➤')} ${C.cyan(question)}${suffix} `, ans => {
       const v = ans.trim();
       resolve(v === '' ? def : v);
     });
@@ -162,6 +162,15 @@ async function askYN(question, def = false) {
   const ans = (await ask(`${question} (${hint})`, '')).toLowerCase();
   if (ans === '') return def;
   return ans === 'y' || ans === 'yes';
+}
+/** 交互分区标题：┌─ 标题 ─────────────────┐ */
+function section(title) {
+  const fill = '─'.repeat(Math.max(2, BOX_W - displayWidth(title) - 4));
+  console.log(`\n${C.pink('┌─ ')}${C.bold(title)}${C.pink(` ${fill}┐`)}`);
+}
+/** 交互完成汇总行（带键值对齐） */
+function summaryRow(k, v) {
+  console.log(`  ${C.dim(k.padEnd(4))}${C.bold(String(v))}`);
 }
 /** 静默输入（用于 Cookie，不回显） */
 function askSilent(question) {
@@ -422,14 +431,18 @@ async function main() {
   if (process.stdin.isTTY && !args.oid && args.cookie == null) {
     console.log(BANNER);
     rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    console.log(`${C.bold('请选择模式:')}`);
-    console.log(`  ${C.cyan('1')} 持续监控（默认）：检测到置顶评论变化自动出图`);
-    console.log(`  ${C.cyan('2')} 单次检查：立即检查并出图一次`);
-    console.log(`  ${C.cyan('0')} 退出`);
+
+    // —— 模式选择（卡片式） ——
+    section('运行模式');
+    console.log(`  ${C.cyan('1')}  ${C.bold('持续监控')}（默认）  ${C.dim('检测到置顶评论变化自动出图')}`);
+    console.log(`  ${C.cyan('2')}  ${C.bold('单次检查')}          ${C.dim('立即检查并出图一次')}`);
+    console.log(`  ${C.cyan('0')}  ${C.bold('退出')}`);
     const mode = await ask('选择', '1');
-    if (mode === '0') { console.log('再见 👋'); rl.close(); return; }
+    if (mode === '0') { console.log('\n再见 👋'); rl.close(); return; }
     cfg.once = mode === '2';
 
+    // —— 目标设置 ——
+    section('目标设置');
     const uidAns = await ask('目标 UP 主 UID', cfg.uid);
     cfg.uid = uidAns || DEFAULT_UID;
 
@@ -451,12 +464,17 @@ async function main() {
       console.log(C.yellow('  ⚠ 未提供 Cookie 时自动识别置顶动态可能被风控（-352），届时程序会提示你补充。'));
     }
 
+    // —— 监控行为 ——
+    section('监控行为');
     if (!cfg.once) {
       const iv = await ask('检查间隔（秒）', String(cfg.interval));
       if (parseInt(iv, 10) >= 10) cfg.interval = parseInt(iv, 10);
     }
-    cfg.showReplies = await askYN('卡片上绘制精彩回复', cfg.showReplies);
     cfg.trackDyn = await askYN('同时监测普通动态更新（置顶未变但发了新动态时提示并出图）', cfg.trackDyn);
+
+    // —— 卡片与输出 ——
+    section('卡片与输出');
+    cfg.showReplies = await askYN('卡片上绘制精彩回复', cfg.showReplies);
     const outAns = await ask('输出目录', cfg.outDir);
     if (outAns) cfg.outDir = outAns;
     const nameAns = await ask('卡片标题显示名（留空自动取 UP 名）', cfg.upName || '');
@@ -470,6 +488,15 @@ async function main() {
     });
     rl.close();
     rl = null;
+
+    // —— 配置汇总 ——
+    console.log(`\n${C.pink('┌─ ')}${C.bold('配置完成')}${C.pink(` ${'─'.repeat(Math.max(2, BOX_W - displayWidth('配置完成') - 4))}┐`)}`);
+    summaryRow('目标', cfg.oid ? `动态 ${cfg.oid}` : `UID ${cfg.uid}${cfg.cookie ? '（已带 Cookie）' : '（匿名）'}`);
+    summaryRow('模式', cfg.once ? '单次检查' : `持续监控 · 每 ${cfg.interval}s`);
+    if (cfg.trackDyn) summaryRow('监测', '普通动态更新已开启');
+    if (cfg.showReplies) summaryRow('卡片', '含精彩回复');
+    summaryRow('输出', cfg.outDir);
+    console.log(`\n${C.green('✔')} 开始运行，Ctrl+C 随时退出\n`);
   } else if (!cfg.oid && !cfg.cookie) {
     // 非交互且无 oid：尝试匿名自动识别（可能被风控）
     console.log(C.dim('未指定 --oid 且无 Cookie，尝试匿名自动识别置顶动态（可能被风控）...'));
