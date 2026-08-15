@@ -433,8 +433,16 @@ async function main() {
     const uidAns = await ask('目标 UP 主 UID', cfg.uid);
     cfg.uid = uidAns || DEFAULT_UID;
 
-    const cookieAns = await ask('SESSDATA Cookie（可选，留空匿名；提供后可自动识别置顶动态）', '');
-    if (cookieAns) cfg.cookie = cookieAns;
+    // Cookie 交互：已有保存的 Cookie 时明确提示（留空会沿用，输入 clear 清除回到匿名）
+    const cookieAns = await ask(
+      cfg.cookie
+        ? `SESSDATA Cookie（已保存，回车沿用；输入 ${C.yellow('clear')} 清除后匿名）`
+        : 'SESSDATA Cookie（可选，留空匿名；提供后可自动识别置顶动态）',
+      '');
+    if (cookieAns.trim().toLowerCase() === 'clear') {
+      cfg.cookie = '';
+      if (!cfg.quiet) log(C.dim('已清除已保存的 Cookie，本次以匿名运行'));
+    } else if (cookieAns) cfg.cookie = cookieAns;
 
     const oidAns = await ask('动态链接或 ID（可选，留空则自动识别置顶动态）', cfg.oid || '');
     if (oidAns) cfg.oid = extractId(oidAns);
