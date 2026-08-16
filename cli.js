@@ -15,13 +15,14 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const readline = require('readline');
-const { BiliError, getPinnedDynamic, getPinnedComment, getReplies, getCommentDetail, getDynamicUpper, getAllSubReplies, filterUpInteractions } = require('./lib/api');
+const { BiliError, getPinnedDynamic, getPinnedComment, getReplies, getCommentDetail, getDynamicUpper, getAllSubReplies, filterUpInteractions, extractId } = require('./lib/api');
 const { generateCard, generateUnpinnedCard, generateDynamicCard } = require('./lib/card');
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const CFG_DIR = path.join(os.homedir(), '.bili-pinned-card');
 const CFG_FILE = path.join(CFG_DIR, 'config.json');
 const DEFAULT_UID = '401315430';
+const MAX_CHAIN_ITEMS = 30; // 互动回顾图最多渲染条数（防超长 SVG）
 
 // ====== 终端样式 ======
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -73,6 +74,15 @@ ${boxBorder('╚', '╝')}
 `;
 
 // ====== 参数解析 ======
+/** 读取带值参数的值；缺失时输出错误并退出 */
+function argValue(argv, i, name) {
+  const v = argv[i + 1];
+  if (v === undefined) {
+    console.error(C.red(`参数 ${name} 缺少值，用法见 --help`));
+    process.exit(1);
+  }
+  return v;
+}
 function parseArgs(argv) {
   const a = {
     uid: null, oid: null, rpid: null, type: null, interval: null, out: null,
@@ -83,14 +93,14 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     switch (arg) {
-      case '--uid': case '-u': set('uid', argv[++i]); break;
-      case '--oid': set('oid', argv[++i]); break;
-      case '--rpid': set('rpid', argv[++i]); break;
-      case '--type': case '-t': set('type', argv[++i]); break;
-      case '--interval': case '-i': set('interval', argv[++i]); break;
-      case '--out': case '-o': set('out', argv[++i]); break;
-      case '--cookie': case '-c': set('cookie', argv[++i]); break;
-      case '--up-name': set('upName', argv[++i]); break;
+      case '--uid': case '-u': set('uid', argValue(argv, i, arg)); i++; break;
+      case '--oid': set('oid', argValue(argv, i, arg)); i++; break;
+      case '--rpid': set('rpid', argValue(argv, i, arg)); i++; break;
+      case '--type': case '-t': set('type', argValue(argv, i, arg)); i++; break;
+      case '--interval': case '-i': set('interval', argValue(argv, i, arg)); i++; break;
+      case '--out': case '-o': set('out', argValue(argv, i, arg)); i++; break;
+      case '--cookie': case '-c': set('cookie', argValue(argv, i, arg)); i++; break;
+      case '--up-name': set('upName', argValue(argv, i, arg)); i++; break;
       case '--track-dyn': set('trackDyn', true); break;
       case '--no-track-dyn': set('trackDyn', false); break;
       case '--context': set('context', true); break;
@@ -143,6 +153,8 @@ function saveConfig(cfg) {
   try {
     fs.mkdirSync(CFG_DIR, { recursive: true });
     fs.writeFileSync(CFG_FILE, JSON.stringify(cfg, null, 2), 'utf-8');
+    // 配置含 SESSDATA Cookie：POSIX 平台收紧为仅本人可读写（600），防同机其他用户读取
+    if (process.platform !== 'win32') { try { fs.chmodSync(CFG_FILE, 0o600); } catch { /* 忽略 */ } }
   } catch { /* 忽略 */ }
 }
 
@@ -256,47 +268,8 @@ function selectYN(question, def = false, io = { stdin: process.stdin, stdout: pr
     stdin.on('data', onData);
   });
 }
-/** 静默输入（用于 Cookie，不回显） */
-function askSilent(question) {
-  return new Promise(resolve => {
-    const stdin = process.stdin;
-    const stdout = process.stdout;
-    stdout.write(C.cyan(question) + ' ');
-    const onData = ch => {
-      if (ch === '\r' || ch === '\n') {
-        stdin.removeListener('data', onData);
-        stdout.write('\n');
-        resolve(process._silentBuf || '');
-        process._silentBuf = '';
-      } else if (ch === '\u0003') {
-        process.exit(130);
-      } else if (ch === '\u007f') {
-        process._silentBuf = (process._silentBuf || '').slice(0, -1);
-      } else {
-        process._silentBuf = (process._silentBuf || '') + ch;
-      }
-    };
-    stdin.setRawMode(true);
-    stdin.on('data', onData);
-    stdin.once('end', () => resolve(process._silentBuf || ''));
-  }).finally(() => { try { process.stdin.setRawMode(false); } catch { /* noop */ } });
-}
 
-function maskCookie(c) {
-  if (!c) return '';
-  return c.replace(/(SESSDATA)=([^;]{6})[^;]*/, '$1=$2****');
-}
-
-/** 从链接/裸输入中提取动态 ID 或评论 ID（提取失败原样返回） */
-function extractId(v) {
-  const s = String(v || '').trim();
-  if (!s) return s;
-  const dyn = s.match(/(?:t\.bilibili\.com|bilibili\.com)\/(?:dynamic\/)?(\d+)/);
-  if (dyn) return dyn[1];
-  const rep = s.match(/comment_root_id=(\d+)|comment_id=(\d+)|#reply(\d+)/);
-  if (rep) return rep[1] || rep[2] || rep[3];
-  return s;
-}
+/** 从链接/裸输入中提取动态 ID 或评论 ID（提取失败原样返回）——实现见 lib/api.js 的 extractId */
 
 // ====== 状态 ======
 function stateFile(outDir) {
@@ -328,7 +301,11 @@ async function generateUnpinnedIfPossible(st, cfg, reason) {
     }
     if (!cfg.quiet) log(C.dim(`拉取旧评论 ${oldRpid} 的子回复...`));
     const replies = await getAllSubReplies(oldOid, oldType, oldRpid, cfg.cookie, 5);
-    const items = filterUpInteractions(replies, cfg.uid);
+    let items = filterUpInteractions(replies, cfg.uid);
+    if (items.length > MAX_CHAIN_ITEMS) {
+      items = items.slice(0, MAX_CHAIN_ITEMS); // 互动过多时截断，避免 SVG 超高/渲染缓慢
+      if (!cfg.quiet) log(C.dim(`互动过多，仅展示前 ${MAX_CHAIN_ITEMS} 条`));
+    }
     const replyN = items.filter(i => i.kind === 'reply').length;
     const likeN = items.filter(i => i.kind === 'like').length;
     if (!cfg.quiet) log(C.dim(`UP 回复 ${replyN} 条, UP 点赞 ${likeN} 条, 共 ${items.length} 条互动`));
@@ -363,20 +340,30 @@ async function checkOnce(cfg) {
       // 未显式指定 --uid 时，自动识别该动态的 UP（评论接口 upper 字段）
       let upMid = uid;
       let upLabel = upName || '';
+      let identified = !!cfg.uidExplicit; // 显式指定即视为已确定
       if (!cfg.uidExplicit) {
         const upper = await getDynamicUpper(oid, type || 11, cookie).catch(() => null);
-        if (upper) { upMid = upper.mid; upLabel = upLabel || upper.name; }
+        if (upper) { upMid = upper.mid; upLabel = upLabel || upper.name; identified = true; }
+      }
+      // 自动识别失败且无显式/保存的 uid：明确提示中止，不静默兜底到 DEFAULT_UID（会筛选错人）
+      if (!identified && String(upMid) === String(DEFAULT_UID)) {
+        if (!cfg.quiet) log(C.red('✗ 无法自动识别该动态的 UP，请用 --uid <UP主UID> 显式指定后再试'));
+        return { event: 'error', oid };
       }
       if (!cfg.quiet) log(C.dim(`拉取评论 ${rpid} 的全部子回复（UP: ${upLabel || upMid}）...`));
       const replies = await getAllSubReplies(oid, type || 11, rpid, cookie, 5);
-      const items = filterUpInteractions(replies, upMid || DEFAULT_UID);
+      let items = filterUpInteractions(replies, upMid);
+      if (items.length > MAX_CHAIN_ITEMS) {
+        items = items.slice(0, MAX_CHAIN_ITEMS); // 互动过多时截断，避免 SVG 超高/渲染缓慢
+        if (!cfg.quiet) log(C.dim(`互动过多，仅展示前 ${MAX_CHAIN_ITEMS} 条`));
+      }
       const replyN = items.filter(i => i.kind === 'reply').length;
       const likeN = items.filter(i => i.kind === 'like').length;
       if (!cfg.quiet) log(C.dim(`子回复 ${replies.length} 条, UP 回复 ${replyN} 条, UP 点赞 ${likeN} 条`));
       const { file } = await generateUnpinnedCard({
         comment,
         items,
-        opts: { upName: upLabel || comment.author, oid, upMid: upMid || DEFAULT_UID },
+        opts: { upName: upLabel || comment.author, oid, upMid },
         outDir,
       });
       if (!cfg.quiet) log(`${C.green('✅ UP互动回顾图已生成:')} ${file}`);
@@ -426,6 +413,7 @@ async function checkOnce(cfg) {
 
   // B. 普通动态更新（置顶未变，但最新动态变了）→ 提示 + 出动态更新卡片
   const dynUpdate = trackDyn && dyn && st?.lastLatestId && st.lastLatestId !== dyn.latestId && !dynChanged;
+  let dynFile = null; // 本次动态卡文件（局部变量，不挂到 st 上避免污染 state.json）
   if (dynUpdate) {
     if (!cfg.quiet) log(`${C.yellow('🆕 检测到普通动态更新')} (${dyn.latestId})，生成动态卡片...`);
     try {
@@ -435,7 +423,7 @@ async function checkOnce(cfg) {
         outDir,
       });
       if (!cfg.quiet) log(`${C.green('✅ 动态更新卡片:')} ${file}`);
-      st._dynFile = file;
+      dynFile = file;
     } catch (err) {
       if (!cfg.quiet) log(C.red(`✗ 动态卡片生成失败: ${err.message}`));
     }
@@ -445,7 +433,7 @@ async function checkOnce(cfg) {
     if (!cfg.quiet) log(`${C.dim('置顶评论未变化:')} ${C.bold(comment.author)} "${(comment.message || '').slice(0, 30)}"${C.dim(` (rpid=${comment.rpid})`)}`);
     if (dynUpdate) {
       saveState(outDir, { ...st, lastLatestId: dyn.latestId, lastCheck: new Date().toISOString() });
-      return { event: 'dyn-update', file: st._dynFile };
+      return { event: 'dyn-update', file: dynFile };
     }
     return { event: 'same', oid, type, comment };
   }
@@ -510,10 +498,21 @@ async function main() {
   if (cfg.rpid) cfg.rpid = extractId(cfg.rpid);
   if (!Number.isFinite(cfg.interval) || cfg.interval < 10) cfg.interval = 60;
   if (!Number.isFinite(cfg.type)) cfg.type = 11;
+  // uid 必须是纯数字（拼入 API URL，脏值产生无效请求且无提示）
+  if (args.uid && !/^\d+$/.test(String(args.uid))) {
+    console.error(C.red(`--uid 必须是数字 UID，收到: ${args.uid}`));
+    process.exit(1);
+  }
+  if (saved.uid && !/^\d+$/.test(String(saved.uid))) {
+    console.error(C.red(`配置中的 uid 非法（${saved.uid}），请删除 ~/.bili-pinned-card/config.json 后重试`));
+    process.exit(1);
+  }
 
   // ---- 交互模式：终端提示引导 ----
+  let bannerShown = false;
   if (process.stdin.isTTY && !args.oid && args.cookie == null) {
     console.log(BANNER);
+    bannerShown = true;
     rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
     // —— 模式选择（↑/↓ 移动光标，回车确认） ——
@@ -588,7 +587,7 @@ async function main() {
     console.log(C.dim('未指定 --oid 且无 Cookie，尝试匿名自动识别置顶动态（可能被风控）...'));
   }
 
-  if (!cfg.quiet) {
+  if (!cfg.quiet && !bannerShown) {
     console.log(BANNER);
     log(`${C.bold('目标:')} ${cfg.oid ? '动态 ' + cfg.oid : 'UID ' + cfg.uid}${cfg.cookie ? ' ' + C.dim('(已带 Cookie)') : C.dim(' (匿名)')}`);
     log(`${C.bold('输出:')} ${cfg.outDir} · ${cfg.once ? '单次检查' : `每 ${cfg.interval}s 监控`}${cfg.force ? ' · 强制出图' : ''}${cfg.showReplies ? ' · 含精彩回复' : ''}`);

@@ -9,7 +9,27 @@ const card = require('../lib/card');
 const api = require('../lib/api');
 
 const { fmtCount, fmtTime, charWpx, measureText, tokenize, wrapTokens } = card;
-const { filterUpInteractions, extractDynamicContent } = api;
+const { filterUpInteractions, extractDynamicContent, extractId } = api;
+
+// ====== extractId（回归：评论分享链接必须提取 rpid 而非 oid） ======
+test('extractId 评论分享链接提取 rpid', () => {
+  assert.strictEqual(extractId('https://t.bilibili.com/404135596?comment_root_id=313406396048'), '313406396048');
+  assert.strictEqual(extractId('https://t.bilibili.com/404135596?comment_id=313406396048'), '313406396048');
+  assert.strictEqual(extractId('https://t.bilibili.com/404135596#reply313406396048'), '313406396048');
+});
+
+test('extractId 动态链接/裸输入提取 oid', () => {
+  assert.strictEqual(extractId('https://t.bilibili.com/404135596'), '404135596');
+  assert.strictEqual(extractId('https://www.bilibili.com/dynamic/404135596'), '404135596');
+  assert.strictEqual(extractId('404135596'), '404135596');
+  assert.strictEqual(extractId('313406396048'), '313406396048');
+});
+
+test('extractId 无法识别时原样返回', () => {
+  assert.strictEqual(extractId(''), '');
+  assert.strictEqual(extractId('随便一句话'), '随便一句话');
+  assert.strictEqual(extractId(null), '');
+});
 
 // ====== fmtCount ======
 test('fmtCount 万级格式化', () => {

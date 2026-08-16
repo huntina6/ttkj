@@ -67,8 +67,9 @@ function regionStats(px, W, x0, y0, w, h) {
 
 const file = process.argv[2];
 const { width, height, px } = parsePng(fs.readFileSync(file));
-// 布局常量（与 lib/card.js 一致）
-const PAD = 30, INNER_PAD = 22, INNER_X = PAD + INNER_PAD; // 52
+// 布局常量（与 lib/card.js 保持同源，避免硬编码漂移）
+const card = require('../lib/card');
+const { PAD, INNER_PAD, INNER_X } = card;
 const scale = width / 680; // 2x 输出
 const s = v => Math.round(v * scale);
 

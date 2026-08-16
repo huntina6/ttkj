@@ -147,7 +147,7 @@ node cli.js --uid 401315430 --cookie "SESSDATA=xxx" --watch -i 300 -q
 ## 开发与验证
 
 ```bash
-npm test        # 20 个单元测试（node:test 零依赖）
+npm test        # 26 个单元测试（node:test 零依赖）
 npm run check   # 全部 JS 语法检查（跨平台）
 
 # 像素级验证卡片布局（头像可见 / 正文对齐 / 统计栏区域）
