@@ -430,7 +430,10 @@ async function checkOnce(cfg) {
   }
 
   if (!changed) {
-    if (!cfg.quiet) log(`${C.dim('置顶评论未变化:')} ${C.bold(comment.author)} "${(comment.message || '').slice(0, 30)}"${C.dim(` (rpid=${comment.rpid})`)}`);
+    // 完整输出评论正文（不再截断 30 字；超长评论多行打印，便于核对内容）
+    const msg = comment.message || '';
+    const body = msg.length > 120 ? `\n${C.dim('  ')}${msg}` : `"${msg}"`;
+    if (!cfg.quiet) log(`${C.dim('置顶评论未变化:')} ${C.bold(comment.author)} ${body}${C.dim(` (rpid=${comment.rpid})`)}`);
     if (dynUpdate) {
       saveState(outDir, { ...st, lastLatestId: dyn.latestId, lastCheck: new Date().toISOString() });
       return { event: 'dyn-update', file: dynFile };
